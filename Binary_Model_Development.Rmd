@@ -1,0 +1,122 @@
+---
+title: "Binary_Model_Development"
+author: "Scarlett He"
+date: "2023-04-05"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Baseline Algorithm
+## Initial model 
+```{r,warning=FALSE}
+#Packages needed
+library(dplyr)
+library(caret)
+
+#Load training dataset
+data <- read.table("training_data.txt", header = TRUE)
+
+
+# specify the proportion of data to be used for testing
+test_size <- 0.3
+
+# create the indices for the data split
+indices <- createDataPartition(data$activity, p = test_size, list = FALSE)
+
+# split the data into training and testing sets
+train <- data[-indices, ]
+test <- data[indices, ]
+
+#Data preprocessing: change activity data to binary 
+train <- train %>% 
+  mutate(activity = ifelse(activity %in% c(4,5,6), 0, 1)) 
+
+train$activity <- as.factor(train$activity)
+
+#remove label from test dataset and save it for later accuracy calculation 
+test <- test %>% 
+  mutate(activity = ifelse(activity %in% c(4,5,6), 0, 1)) 
+
+test_act <- test[,2]
+test <- test[,-2]
+
+#Build binary classifier model 
+initial_model <- glm(activity~. , data = train, family = binomial)
+
+#Predict using builded model on test dataset
+initial_predict<- predict(initial_model, newdata = test, type = "response")
+
+initial_predict <- ifelse(initial_predict >= 0.5, 1, 0)
+```
+
+## Performance based on training data
+```{r}
+accuracy <- mean(initial_predict == test_act)
+```
+
+
+# Tried to improve accuracy 
+After reading the data_dictionary and README and getting the result back from leader board, I realized that the previous binary category is not right. Only activity 1,2,3 should be considered as dynamic. Other activities are all static. 
+So I tried again based on the new category and trained another model. 
+```{r, warning=FALSE}
+
+
+train <- data[-indices, ]
+test <- data[indices, ]
+
+train <- train %>% 
+  mutate(activity = ifelse(activity %in% c(4,5,6,7,8,9,10,11,12), 0, activity)) %>%
+  mutate(activity = ifelse(activity %in% c(1,2,3), 1, activity))
+
+train$activity <- as.factor(train$activity)
+
+test <- test %>% 
+  mutate(activity = ifelse(activity %in% c(4,5,6,7,8,9,10,11,12), 0, activity)) %>%
+  mutate(activity = ifelse(activity %in% c(1,2,3), 1, activity))
+
+
+test_act <- test[,2]
+test <- test[,-2]
+
+#Build binary classifier model 
+new_model <- glm(activity~. , data = train, family = binomial)
+
+#Predict using builded model on test dataset
+new_predict<- predict(new_model, newdata = test, type = "response")
+
+new_predict <- ifelse(new_predict >= 0.5, 1, 0)
+
+accuracy <- mean(new_predict == test_act)
+```
+
+
+# Final Algorithm
+ 
+There is improvement comparing with initial and final algorithm. So the new model conducted is used as the final algorithm. The prediction was performed on provided test dataset and the predicted result was submitted to test for accuracy on leaderboard. The accuracy received from leader board is 1.000 for the final algorithm. 
+
+
+# Model Performance 
+```{r}
+# create a data frame
+df <- data.frame(
+  model = c("initial_model", "final_model"),
+  accuracy_on_training_data = c(0.997, 1.000),
+  accuracy_on_leaderboard = c(0.991, 1.000)
+)
+
+# print the data frame as a table
+knitr::kable(df)
+
+```
+
+# Comment and Potential Improvement 
+I need to be more careful on reading data dictionary and learning tasks when building the model. 
+
+
+Based on the accuracy from training data and leaderboard, the performance for the final Algorithm is 1.00, which is a good result and we can see the imporvement from the initial model. 
+
+
+

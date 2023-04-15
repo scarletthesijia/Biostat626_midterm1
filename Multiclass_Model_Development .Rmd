@@ -1,0 +1,281 @@
+---
+title: "Multiclass_Model_Development"
+author: "Scarlett He"
+date: "2023-04-05"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Baseline Algorithm
+## Initial model 
+I started with fitting svm model. 
+
+```{r}
+library(dplyr)
+library(caret)
+library(randomForest)
+library(e1071)
+
+data <- read.table("training_data.txt", header = TRUE)
+data <- 
+  data %>%  mutate(activity = ifelse(activity %in% c(7,8,9,10,11,12), 7, activity)) 
+# create the indices for the data split
+indices <- createDataPartition(data$activity, p = 0.3, list = FALSE)
+
+# split the data into training and testing sets
+train <- data[-indices, ]
+train$activity <- factor(train$activity) 
+test <- data[indices, ]
+
+test_act <- test[,2]
+test <- test[,-2]
+
+train$activity <- factor(train$activity) 
+
+svm_model <- svm(activity ~ ., data = train, cost = 0.1, kernel = "radial",
+                       shrinking = T)
+
+svm_pred <- predict(svm_model, test, type="class")
+
+svm_pred <- as.data.frame(svm_pred)
+
+accuracy <- mean(svm_pred == test_act)
+```
+In this initial model, the svm model with radial kernel is used for multiclass prediction. The accuracy of this model on training data is 0.915. 
+
+
+# Models tried to improve accuracy 
+## Add CV 
+I tried to improve the model by adding control in the svm model using cross validation. 
+During this process, I also tried to tune the model by finding the best cost and kernel. When cost = 0.1 and the kernel is linear, cv=10, the model has best performance. 
+
+### Tuning the model
+```{r, echo=TRUE, eval=FALSE}
+# Define the tuning grid for SVM hyperparameters
+tuningGridSVM <- expand.grid(C = c(0.1, 1, 10), 
+                          kernel = c("linear", "radial"))
+
+# Define the tuning grid for trainControl parameters
+tuningGridTC <- expand.grid(method = c("cv", "boot", "repeatedcv"), 
+                            number = c(5, 10, 20), 
+                            repeats = c(1, 2, 3))
+
+# Train the SVM model using 10-fold cross-validation and tune the hyperparameters and trainControl parameters
+svmFit <- train(activity ~ ., data = trainData, 
+                method = "svm", 
+                trControl = trainControl(method = "cv", number = 10), 
+                tuneGrid = list(svm = tuningGridSVM, trControl = tuningGridTC))
+
+```
+
+### Model used after tuning
+```{r}
+ctrl <- trainControl(method = "cv", number = 10)
+svm_model_2 <- svm(activity ~ ., data = train, cost = 0.1, kernel = "linear",
+                       shrinking = T, trControl = ctrl)
+svm_pred <- predict(svm_model_2, test, type="class")
+
+svm_pred <- as.data.frame(svm_pred)
+accuracy <- mean(svm_pred == test_act)
+```
+There is improvement by tuning the svm model and adding the control. The accuracy based on training data improved from 0.915 to 0.987.
+
+## Add Random Forest 
+I further tried to add random forest before svm model to select important variables and then use these selected variables to the svm model. 
+
+```{r}
+rf_model <- randomForest(activity ~ ., data = train, ntree = 500, importance = TRUE)
+imp_features <- importance(rf_model)
+head(imp_features)
+top_features <- names(sort(imp_features[, "MeanDecreaseAccuracy"], 
+                           decreasing = TRUE)[1:500])
+
+activity <- train$activity
+activity <- as.data.frame(activity)
+
+train_top <- as.data.frame(train[,c(top_features)])
+train_top <- cbind(activity,train_top)
+test_top <- test[,c(top_features)]
+
+# convert the activity variable to a factor
+train_top$activity <- factor(train_top$activity)
+
+ctrl <- trainControl(method = "cv", number = 10)
+
+svm_model_3 <- svm(activity ~ ., data = train_top, cost = 0.1, kernel = "linear",
+                       shrinking = T, trControl = ctrl)
+
+svm_pred <- predict(svm_model_3, test_top, type="class")
+
+svm_pred <- as.data.frame(svm_pred)
+
+accuracy <- mean(svm_pred == test_act)
+```
+Based on the accuracy on training data, the random forest selection did improve the model accuracy. 
+
+## Neural Network 
+I also tried to use neural network to build the classifier. The model is also tuned to find the best inputs. 
+
+```{r,echo=TRUE,eval=FALSE}
+library(caret)
+
+# Define a set of hyperparameters to tune
+hyperparameters <- list(
+  learning_rate = c(0.001, 0.01, 0.1),
+  batch_size = c(32, 64, 128),
+  num_epochs = c(10, 20, 30),
+  activation = c("relu", "sigmoid", "tanh"),
+  dropout_rate = c(0.1, 0.2, 0.3)
+)
+
+# Define a function to build and train the neural network
+build_and_train <- function(learning_rate, batch_size, num_epochs, activation, dropout_rate) {
+  # Build the model
+  model <- keras_model_sequential()
+  model %>%
+    layer_dense(units = 64, activation = activation, input_shape = c(562)) %>%
+    layer_dropout(rate = dropout_rate) %>%
+    layer_dense(units = 32, activation = activation) %>%
+    layer_dropout(rate = dropout_rate) %>%
+    layer_dense(units = 7, activation = "softmax")
+  
+  # Compile the model
+  model %>% compile(
+    loss = "categorical_crossentropy",
+    optimizer = optimizer_adam(lr = learning_rate),
+    metrics = c("accuracy")
+  )
+  
+  # Train the model
+  history <- model %>% fit(
+    x_train, y_train,
+    batch_size = batch_size,
+    epochs = num_epochs,
+    validation_data = list(x_test, y_test),
+    verbose = 0
+  )
+  
+  # Return the accuracy of the model
+  return(max(history$metrics$val_accuracy))
+}
+
+# Generate a grid of hyperparameters to test
+hyper_grid <- expand.grid(
+  learning_rate = hyperparameters$learning_rate,
+  batch_size = hyperparameters$batch_size,
+  num_epochs = hyperparameters$num_epochs,
+  activation = hyperparameters$activation,
+  dropout_rate = hyperparameters$dropout_rate
+)
+
+```
+
+```{r,echo=TRUE,eval=FALSE}
+data <- read.table("training_data.txt", header = TRUE)
+data <- train %>% 
+  mutate(activity = ifelse(activity %in% c(7,8,9,10,11,12), 7, activity)) 
+# create the indices for the data split
+indices <- createDataPartition(data$activity, p = 0.3, list = FALSE)
+
+# split the data into training and testing sets
+train <- data[-indices, ]
+train$activity <- factor(train$activity) 
+test <- data[indices, ]
+test$activity <- as.factor(test$activity)
+
+library(reticulate)
+use_condaenv("myenv")
+np <- import("numpy")
+py_config()
+
+library(keras)
+
+# Set the seed for reproducibility
+set.seed(123)
+
+# Create a sequential model
+model <- keras_model_sequential()
+
+# Add layers to the model
+model %>%
+  layer_dense(units = 64, activation = "relu", input_shape = c(562)) %>%
+  layer_dropout(rate = 0.1) %>%
+  layer_dense(units = 32, activation = "relu") %>%
+  layer_dropout(rate = 0.1) %>%
+  layer_dense(units = 16, activation = "relu") %>%
+  layer_dense(units = 7, activation = "softmax")
+
+# Compile the model
+model %>% compile(
+  loss = "categorical_crossentropy",
+  optimizer = optimizer_rmsprop(),
+  metrics = c("accuracy")
+)
+
+levels(train$activity)
+
+#prepare data
+y_train <- to_categorical(as.numeric(train$activity) - 1, num_classes = 7)
+x_train <- as.matrix(train[,-2])
+y_test <- to_categorical(as.numeric(test$activity) - 1, num_classes = 7)
+x_test <- as.matrix(test[,-2])
+
+#fit model
+fit <- model %>% fit(
+  x_train, y_train,
+  epochs = 50,
+  batch_soze =32,
+  vaidation_split=0.2
+)
+  
+scores <- model %>% evaluate(
+  x_test, y_test,
+  verbose = 0
+)
+
+test <- as.matrix(test)
+predicted_labels <- model %>% predict(test) %>% k_argmax()
+
+predicted_matrix <- as.matrix(predicted_labels)
+predicted_df <- as.data.frame(predicted_matrix)
+
+predicted_df$V1 <- predicted_df$V1 + 1
+
+accuracy <- mean(predicted_df == test_act)
+```
+
+# Final Algorithm
+The algorithm with random forest feature selection, CV and SVM was selected to be the final algorithm because of the accuracy performance on leaderboard. 
+
+
+#Performance 
+
+```{r}
+# model2 is the tuned initial model with cv added to svm 
+# model3 is based on model 2 with random forest selection 
+# model4 is the neural network model 
+# final model is model2 
+# N/A is missing value because this model is not submitted to leaderboard
+
+# create a data frame
+df <- data.frame(
+  model = c("initial_model", "model2","model3","model4"),
+  accuracy_on_training_data = c(0.951, 0.987,0.984,0.991),
+  accuracy_on_leaderboard = c("N/A", 0.956,0.958, 0.933)
+)
+
+# print the data frame as a table
+knitr::kable(df)
+
+```
+
+# Potential Improvement 
+
+There are some potential improvements can be applied to the model to increase the accuracy. The performance of SVM models can be sensitive to the scaling of the input data. Consider standardizing the data before training the model to ensure that each feature contributes equally to the classification decision. Even though I have already tried to tune the model, I can still try to use more extensive grid search or try different combinations of hyperparameters. 
+
+
+
+
